@@ -86,6 +86,11 @@ export function useMonitoring() {
     const controller  = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
+    setMonitoring(prev => ({
+      ...prev,
+      [config.id]: { ...prev[config.id], isPinging: true },
+    }));
+
     try {
       const res = await fetch(config.url, { method, signal: controller.signal });
       clearTimeout(timeoutHandle);
@@ -123,7 +128,8 @@ export function useMonitoring() {
           [config.id]: {
             ...prev[config.id],
             status,
-            wasOnline: isOnline,
+            wasOnline:  isOnline,
+            isPinging:  false,
             lastPingTs:  Date.now(),
             latencyData: [...(prev[config.id]?.latencyData ?? []).slice(-19), responseTime],
             history:     [...(prev[config.id]?.history     ?? []).slice(-99), entry],
@@ -148,7 +154,8 @@ export function useMonitoring() {
           [config.id]: {
             ...prev[config.id],
             status,
-            wasOnline:   false,
+            wasOnline:  false,
+            isPinging:  false,
             lastPingTs:  Date.now(),
             latencyData: [...(prev[config.id]?.latencyData ?? []).slice(-19), 0],
             history:     [...(prev[config.id]?.history     ?? []).slice(-99), entry],

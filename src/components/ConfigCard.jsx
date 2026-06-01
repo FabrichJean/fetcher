@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Modal,
@@ -44,6 +45,7 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
   const slideAnim   = useRef(new Animated.Value(-6)).current;
 
   const isRunning  = monState?.isRunning ?? false;
+  const isPinging  = monState?.isPinging ?? false;
   const status     = monState?.status;
   const latency    = monState?.latencyData ?? [];
   const lastPingTs = monState?.lastPingTs;
@@ -99,7 +101,10 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
         delayLongPress={350}
         activeOpacity={0.7}
       >
-        <View style={[s.dot, { backgroundColor: dotColor }]} />
+        {isPinging
+          ? <ActivityIndicator size={10} color="#555" style={{ marginRight: 12 }} />
+          : <View style={[s.dot, { backgroundColor: dotColor }]} />
+        }
         <View style={s.meta}>
           <Text style={s.name}>{config.name}</Text>
           <Text style={s.url} numberOfLines={1}>{config.url}</Text>
