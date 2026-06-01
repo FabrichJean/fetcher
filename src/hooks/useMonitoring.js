@@ -10,6 +10,7 @@ import {
   showPersistentNotification,
   dismissPersistentNotification,
 } from "../backgroundTask";
+import { updateWidgetData } from "../widgets/widgetTask";
 
 export function useMonitoring() {
   const [configs, setConfigs] = useState([]);
@@ -85,6 +86,8 @@ export function useMonitoring() {
       unregisterBackgroundTask();
       dismissPersistentNotification();
     }
+
+    updateWidgetData(configsRef.current, monitoring);
   }, [monitoring, hydrated]);
 
   // ── Persistence ────────────────────────────────────────────────────────────

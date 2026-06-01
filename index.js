@@ -1,8 +1,8 @@
 import { registerRootComponent } from 'expo';
-
 import App from './App';
 
-// registerRootComponent calls AppRegistry.registerComponent('main', () => App);
-// It also ensures that whether you load the app in Expo Go or in a native build,
-// the environment is set up appropriately
+// Widget task must be registered at module level, before the app mounts
+import { registerWidgetTask } from './src/widgets/widgetTask';
+registerWidgetTask();
+
 registerRootComponent(App);

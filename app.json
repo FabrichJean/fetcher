@@ -33,7 +33,26 @@
     "plugins": [
       "expo-asset",
       "expo-font",
-      "expo-background-fetch"
+      "expo-background-fetch",
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "MonitorWidget",
+              "label": "PingPulse Monitor",
+              "description": "Shows live status of your monitors",
+              "minWidth": "180dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 2,
+              "targetCellHeight": 2,
+              "updatePeriodMillis": 1800000,
+              "resizeMode": "horizontal|vertical",
+              "previewImage": "./assets/icon.png"
+            }
+          ]
+        }
+      ]
     ]
   }
 }
