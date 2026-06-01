@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { STORAGE_KEY, RUNNING_KEY } from "../constants";
 import { uid, sendTelegramAlert } from "../utils";
 import { sendDownNotification } from "../notifications";
+import {
+  registerBackgroundTask,
+  unregisterBackgroundTask,
+  showPersistentNotification,
+  dismissPersistentNotification,
+} from "../backgroundTask";
 
 export function useMonitoring() {
   const [configs, setConfigs] = useState([]);
@@ -41,6 +48,44 @@ export function useMonitoring() {
     () => () => Object.values(intervals.current).forEach(clearInterval),
     [],
   );
+
+  // ── AppState: resume intervals when app comes back to foreground ───────────
+  const configsRef = useRef(configs);
+  useEffect(() => { configsRef.current = configs; }, [configs]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', nextState => {
+      if (nextState !== 'active') return;
+      // Restart any monitor that is marked running but lost its interval
+      const running = Object.entries(monitoring).filter(([, m]) => m.isRunning);
+      running.forEach(([id]) => {
+        if (intervals.current[id]) return; // still alive
+        const config = configsRef.current.find(c => c.id === id);
+        if (!config) return;
+        pingRef.current?.(config);
+        intervals.current[id] = setInterval(() => pingRef.current?.(config), config.frequency);
+      });
+    });
+    return () => sub.remove();
+  }, [monitoring]);
+
+  // ── Background task + persistent notification lifecycle ────────────────────
+  useEffect(() => {
+    if (!hydrated) return;
+    const runningIds    = Object.entries(monitoring).filter(([, m]) => m.isRunning).map(([id]) => id);
+    const runningCount  = runningIds.length;
+
+    if (runningCount > 0) {
+      const minInterval = Math.min(
+        ...runningIds.map(id => configsRef.current.find(c => c.id === id)?.frequency ?? 60000)
+      );
+      registerBackgroundTask(Math.max(Math.floor(minInterval / 1000), 60));
+      showPersistentNotification(runningCount);
+    } else {
+      unregisterBackgroundTask();
+      dismissPersistentNotification();
+    }
+  }, [monitoring, hydrated]);
 
   // ── Persistence ────────────────────────────────────────────────────────────
 
