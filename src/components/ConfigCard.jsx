@@ -1,18 +1,47 @@
 import { useRef, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import {
+  Animated,
+  Dimensions,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useActionSheet } from '@expo/react-native-action-sheet';
 import LatencyChart from './LatencyChart';
-import { CARD, GREEN, RED } from '../constants';
+import { CARD, CYAN, GREEN, RED } from '../constants';
 import { freqLabel, relativeTime } from '../utils';
 
+const MENU_WIDTH = 210;
+
+function MenuItem({ icon, label, color = '#ccc', onPress }) {
+  return (
+    <TouchableOpacity style={s.menuItem} onPress={onPress} activeOpacity={0.6}>
+      <Ionicons name={icon} size={16} color={color} style={s.menuIcon} />
+      <Text style={[s.menuLabel, { color }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function MenuDivider() {
+  return <View style={s.menuDivider} />;
+}
+
 export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit, onDelete, onViewDetail }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded]     = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [menuPos, setMenuPos]       = useState({ top: 0, right: 0 });
+
   const { width } = useWindowDimensions();
-  const { showActionSheetWithOptions } = useActionSheet();
-  const chartWidth   = width - 32 - 32 - 16;
-  const lastTapRef   = useRef(0);
-  const tapTimerRef  = useRef(null);
+  const chartWidth  = width - 32 - 32 - 16;
+  const rowRef      = useRef(null);
+  const lastTapRef  = useRef(0);
+  const tapTimerRef = useRef(null);
+  const fadeAnim    = useRef(new Animated.Value(0)).current;
+  const slideAnim   = useRef(new Animated.Value(-6)).current;
 
   const isRunning  = monState?.isRunning ?? false;
   const status     = monState?.status;
@@ -20,44 +49,53 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
   const lastPingTs = monState?.lastPingTs;
   const dotColor   = !isRunning ? '#333' : status?.isOnline ? GREEN : RED;
 
-  function showMenu() {
-    const toggleLabel = isRunning ? 'Stop' : 'Launch';
-    const options     = ['View Details', 'Edit', toggleLabel, 'Delete', 'Cancel'];
+  function openMenu() {
+    rowRef.current?.measure((_, __, w, h, pageX, pageY) => {
+      const screenW = Dimensions.get('window').width;
+      setMenuPos({
+        top:   pageY + h + 4,
+        right: screenW - pageX - w,
+      });
+      setMenuVisible(true);
+      slideAnim.setValue(-6);
+      fadeAnim.setValue(0);
+      Animated.parallel([
+        Animated.timing(fadeAnim,  { toValue: 1, duration: 160, useNativeDriver: true }),
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 18, stiffness: 200 }),
+      ]).start();
+    });
+  }
 
-    showActionSheetWithOptions(
-      {
-        title: config.name,
-        options,
-        cancelButtonIndex:      4,
-        destructiveButtonIndex: 3,
-        userInterfaceStyle:     'dark',
-      },
-      index => {
-        if (index === 0) onViewDetail();
-        if (index === 1) onEdit();
-        if (index === 2) isRunning ? onStop() : onLaunch();
-        if (index === 3) onDelete();
-      },
-    );
+  function closeMenu(fn) {
+    Animated.parallel([
+      Animated.timing(fadeAnim,  { toValue: 0, duration: 120, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: -6, duration: 120, useNativeDriver: true }),
+    ]).start(() => {
+      setMenuVisible(false);
+      fn?.();
+    });
+  }
+
+  function handlePress() {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      lastTapRef.current = 0;
+      clearTimeout(tapTimerRef.current);
+      openMenu();
+    } else {
+      lastTapRef.current = now;
+      tapTimerRef.current = setTimeout(() => setExpanded(e => !e), 280);
+    }
   }
 
   return (
     <View style={s.card}>
 
       <TouchableOpacity
+        ref={rowRef}
         style={s.row}
-        onPress={() => {
-          const now = Date.now();
-          if (now - lastTapRef.current < 300) {
-            lastTapRef.current = 0;
-            clearTimeout(tapTimerRef.current);
-            showMenu();
-          } else {
-            lastTapRef.current = now;
-            tapTimerRef.current = setTimeout(() => setExpanded(e => !e), 280);
-          }
-        }}
-        onLongPress={showMenu}
+        onPress={handlePress}
+        onLongPress={openMenu}
         delayLongPress={350}
         activeOpacity={0.7}
       >
@@ -76,9 +114,9 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color="#444" style={{ marginLeft: 8 }} />
       </TouchableOpacity>
 
+      {/* Expanded preview */}
       {expanded && (
         <View style={s.body}>
-
           {status && (
             <View style={s.statusRow}>
               <View style={s.statusLeft}>
@@ -94,7 +132,6 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
               </View>
             </View>
           )}
-
           {latency.length >= 2 && (
             <>
               <Text style={s.sectionLabel}>LATENCY</Text>
@@ -105,17 +142,40 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
               </View>
             </>
           )}
-
           <View style={s.divider} />
-
-          <Text style={s.info}>
-            Freq: <Text style={s.infoVal}>{freqLabel(config.frequency)}</Text>
-            {'   '}
-            <Text style={s.hint}>Hold to see actions</Text>
-          </Text>
-
+          <Text style={s.info}>Freq: <Text style={s.infoVal}>{freqLabel(config.frequency)}</Text></Text>
         </View>
       )}
+
+      {/* Dropdown menu */}
+      <Modal visible={menuVisible} transparent animationType="none" onRequestClose={() => closeMenu()}>
+        <TouchableWithoutFeedback onPress={() => closeMenu()}>
+          <View style={s.backdrop}>
+            <TouchableWithoutFeedback>
+              <Animated.View
+                style={[
+                  s.menu,
+                  { top: menuPos.top, right: menuPos.right },
+                  { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+                ]}
+              >
+                <MenuItem icon="eye-outline" label={`See ${config.name}`} color={CYAN} onPress={() => closeMenu(onViewDetail)} />
+                <MenuItem icon="pencil-outline"    label="Edit"         color="#aaa"  onPress={() => closeMenu(onEdit)} />
+                <MenuDivider />
+                <MenuItem
+                  icon={isRunning ? 'stop-circle-outline' : 'play-circle-outline'}
+                  label={isRunning ? 'Stop' : 'Launch'}
+                  color={isRunning ? RED : GREEN}
+                  onPress={() => closeMenu(isRunning ? onStop : onLaunch)}
+                />
+                <MenuDivider />
+                <MenuItem icon="trash-outline" label="Delete" color={RED} onPress={() => closeMenu(onDelete)} />
+              </Animated.View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
     </View>
   );
 }
@@ -148,8 +208,27 @@ const s = StyleSheet.create({
   sectionLabel: { fontSize: 10, fontWeight: '700', color: '#555', letterSpacing: 1.2, marginTop: 14, marginBottom: 6 },
   xAxis:        { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   axisLabel:    { fontSize: 10, color: '#333' },
+  info:         { fontSize: 12, color: '#444' },
+  infoVal:      { color: '#777', fontWeight: '600' },
 
-  info:    { fontSize: 12, color: '#444' },
-  infoVal: { color: '#777', fontWeight: '600' },
-  hint:    { color: '#2a2a2a', fontSize: 11, fontStyle: 'italic' },
+  // Dropdown
+  backdrop: { flex: 1 },
+  menu: {
+    position:        'absolute',
+    width:           MENU_WIDTH,
+    backgroundColor: '#1e1e1e',
+    borderRadius:    10,
+    borderWidth:     1,
+    borderColor:     '#2a2a2a',
+    paddingVertical: 4,
+    shadowColor:     '#000',
+    shadowOffset:    { width: 0, height: 8 },
+    shadowOpacity:   0.5,
+    shadowRadius:    16,
+    elevation:       12,
+  },
+  menuItem:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12 },
+  menuIcon:    { marginRight: 10 },
+  menuLabel:   { fontSize: 14, fontWeight: '600' },
+  menuDivider: { height: 1, backgroundColor: '#2a2a2a', marginHorizontal: 0 },
 });

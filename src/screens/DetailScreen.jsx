@@ -8,6 +8,36 @@ import { useMonitoringContext } from '../context/MonitoringContext';
 import { BG, CARD, CYAN, GREEN, RED } from '../constants';
 import { freqLabel, relativeTime } from '../utils';
 
+const ERROR_META = {
+  dns:     { icon: 'globe-outline',       color: '#ff9800', label: 'DNS Error'   },
+  timeout: { icon: 'hourglass-outline',   color: '#ff9800', label: 'Timeout'     },
+  ssl:     { icon: 'lock-open-outline',   color: '#ff5722', label: 'SSL Error'   },
+  anomaly: { icon: 'search-outline',      color: '#ffab00', label: 'Anomaly'     },
+  http:    { icon: 'alert-circle-outline',color: RED,       label: 'HTTP Error'  },
+  unknown: { icon: 'wifi-outline',        color: RED,       label: 'Unreachable' },
+};
+
+function ErrorBadge({ errorType }) {
+  if (!errorType) return null;
+  const meta = ERROR_META[errorType] ?? ERROR_META.unknown;
+  return (
+    <View style={[eb.badge, { borderColor: meta.color + '44', backgroundColor: meta.color + '18' }]}>
+      <Ionicons name={meta.icon} size={11} color={meta.color} style={{ marginRight: 4 }} />
+      <Text style={[eb.label, { color: meta.color }]}>{meta.label}</Text>
+    </View>
+  );
+}
+const eb = StyleSheet.create({
+  badge: { flexDirection: 'row', alignItems: 'center', borderRadius: 4, borderWidth: 1, paddingHorizontal: 7, paddingVertical: 3, alignSelf: 'flex-start', marginTop: 6 },
+  label: { fontSize: 10, fontWeight: '700' },
+});
+
+function LogIcon({ entry }) {
+  if (entry.isOnline) return <Ionicons name="checkmark-circle" size={14} color={GREEN} style={{ marginRight: 8 }} />;
+  const meta = ERROR_META[entry.errorType] ?? ERROR_META.unknown;
+  return <Ionicons name={meta.icon} size={14} color={meta.color} style={{ marginRight: 8 }} />;
+}
+
 export default function DetailScreen() {
   const navigation = useNavigation();
   const { params: { configId } } = useRoute();
@@ -18,10 +48,7 @@ export default function DetailScreen() {
   const config   = configs.find(c => c.id === configId);
   const monState = monitoring[configId];
 
-  if (!config) {
-    navigation.goBack();
-    return null;
-  }
+  if (!config) { navigation.goBack(); return null; }
 
   const isRunning     = monState?.isRunning ?? false;
   const status        = monState?.status;
@@ -42,18 +69,14 @@ export default function DetailScreen() {
     return RED;
   }
 
-  function handleDelete() {
-    deleteConfig(configId);
-    navigation.goBack();
-  }
-
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar style="light" />
 
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={s.headerMeta}>
@@ -90,6 +113,7 @@ export default function DetailScreen() {
                 <Text style={s.stat}>Status: <Text style={s.statVal}>{status.label}</Text></Text>
                 <Text style={s.stat}>Response: <Text style={s.statVal}>{status.responseTime ? `${status.responseTime}ms` : 'N/A'}</Text></Text>
                 <Text style={s.stat}>Last Check: <Text style={s.statVal}>{relativeTime(lastPingTs)}</Text></Text>
+                {!status.isOnline && <ErrorBadge errorType={status.errorType} />}
               </View>
             </View>
           ) : (
@@ -139,23 +163,20 @@ export default function DetailScreen() {
         {/* Ping log */}
         <View style={s.card}>
           <Text style={s.sectionLabel}>
-            PING LOG  <Text style={{ color: '#333', fontWeight: '400' }}>{history.length} entries</Text>
+            PING LOG{'  '}<Text style={{ color: '#333', fontWeight: '400' }}>{history.length} entries</Text>
           </Text>
           {history.length === 0 ? (
             <Text style={s.hint}>No pings recorded yet.</Text>
           ) : (
             [...history].reverse().map(entry => (
               <View key={entry.id} style={s.logRow}>
-                <Ionicons
-                  name={entry.isOnline ? 'checkmark-circle' : 'warning'}
-                  size={14}
-                  color={entry.isOnline ? GREEN : RED}
-                  style={{ marginRight: 8 }}
-                />
+                <LogIcon entry={entry} />
                 <Text style={s.logTime}>{entry.timestamp}</Text>
-                <Text style={[s.logLabel, !entry.isOnline && { color: RED }]}>
-                  {entry.label}{entry.responseTime ? `  ${entry.responseTime}ms` : ''}
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.logLabel, !entry.isOnline && { color: entry.errorType === 'anomaly' ? '#ffab00' : RED }]}>
+                    {entry.label}{entry.responseTime ? `  ${entry.responseTime}ms` : ''}
+                  </Text>
+                </View>
               </View>
             ))
           )}
@@ -178,7 +199,17 @@ export default function DetailScreen() {
             <Text style={s.configKey}>Frequency</Text>
             <Text style={s.configVal}>{freqLabel(config.frequency)}</Text>
           </View>
-          <TouchableOpacity style={s.deleteBtn} onPress={handleDelete}>
+          <View style={s.configRow}>
+            <Text style={s.configKey}>Method</Text>
+            <Text style={[s.configVal, { color: CYAN, fontWeight: '700' }]}>{config.method ?? 'GET'}</Text>
+          </View>
+          {config.keyword ? (
+            <View style={s.configRow}>
+              <Text style={s.configKey}>Keyword</Text>
+              <Text style={s.configVal}>"{config.keyword}"</Text>
+            </View>
+          ) : null}
+          <TouchableOpacity style={s.deleteBtn} onPress={() => { deleteConfig(configId); navigation.goBack(); }}>
             <Ionicons name="trash-outline" size={15} color={RED} style={{ marginRight: 6 }} />
             <Text style={s.deleteBtnText}>Delete Monitor</Text>
           </TouchableOpacity>
@@ -207,8 +238,8 @@ const s = StyleSheet.create({
   sectionLabel: { fontSize: 10, fontWeight: '700', color: '#555', letterSpacing: 1.2, marginBottom: 14 },
   hint:         { color: '#333', fontSize: 13, paddingVertical: 4 },
 
-  statusRow:   { flexDirection: 'row', alignItems: 'center' },
-  statusLeft:  { alignItems: 'center', width: 68, marginRight: 14 },
+  statusRow:   { flexDirection: 'row', alignItems: 'flex-start' },
+  statusLeft:  { alignItems: 'center', width: 68, marginRight: 14, paddingTop: 2 },
   statusDot:   { width: 14, height: 14, borderRadius: 7, marginBottom: 6 },
   statusLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
   statusRight: { flex: 1 },
@@ -225,7 +256,7 @@ const s = StyleSheet.create({
 
   logRow:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#1c1c1c' },
   logTime:  { color: '#555', fontSize: 12, marginRight: 8, width: 72 },
-  logLabel: { color: '#888', fontSize: 12, flex: 1 },
+  logLabel: { color: '#888', fontSize: 12 },
 
   configHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   editLink:      { flexDirection: 'row', alignItems: 'center', gap: 4 },

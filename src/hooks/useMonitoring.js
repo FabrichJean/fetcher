@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { STORAGE_KEY, RUNNING_KEY } from "../constants";
 import { uid, sendTelegramAlert } from "../utils";
+import { sendDownNotification } from "../notifications";
 
 export function useMonitoring() {
   const [configs, setConfigs] = useState([]);
@@ -55,83 +56,102 @@ export function useMonitoring() {
     AsyncStorage.setItem(RUNNING_KEY, JSON.stringify(runningIds));
   }, [monitoring, hydrated]);
 
+  // ── Error classifier ──────────────────────────────────────────────────────
+
+  function classifyError(err) {
+    if (err.name === 'AbortError') return { label: 'Timeout', errorType: 'timeout' };
+    const msg = (err.message ?? '').toLowerCase();
+    if (
+      msg.includes('getaddrinfo') || msg.includes('unable to resolve') ||
+      msg.includes('nodename nor servname') || msg.includes('enotfound') ||
+      msg.includes('network request failed') || msg.includes('no address')
+    ) return { label: 'DNS Error', errorType: 'dns' };
+    if (
+      msg.includes('ssl') || msg.includes('certificate') ||
+      msg.includes('cert_') || msg.includes('handshake') || msg.includes('pkix')
+    ) return { label: 'SSL Error', errorType: 'ssl' };
+    return { label: 'Connection Failed', errorType: 'unknown' };
+  }
+
   // ── Core ping logic ────────────────────────────────────────────────────────
 
   async function ping(config) {
-    const start = Date.now();
-    const timestamp = new Date().toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
+    const start      = Date.now();
+    const method     = config.method ?? 'GET';
+    const timeoutMs  = 10000;
+    const timestamp  = new Date().toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
     });
 
+    const controller  = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
-      const res = await fetch(config.url, { method: "GET" });
+      const res = await fetch(config.url, { method, signal: controller.signal });
+      clearTimeout(timeoutHandle);
       const responseTime = Date.now() - start;
-      const status = {
-        statusCode: res.status,
-        responseTime,
-        isOnline: res.ok,
-        label: `${res.status} ${res.statusText || "OK"}`,
-      };
-      const entry = { id: uid(), timestamp, ...status };
+
+      let isOnline  = res.ok;
+      let label     = `${res.status} ${res.statusText || 'OK'}`;
+      let errorType = res.ok ? null : 'http';
+      let anomaly   = null;
+
+      // Keyword matching — only meaningful with GET (HEAD has no body)
+      if (method === 'GET' && config.keyword?.trim() && res.ok) {
+        try {
+          const body = await res.text();
+          if (!body.includes(config.keyword.trim())) {
+            isOnline  = false;
+            anomaly   = `keyword "${config.keyword.trim()}" not found`;
+            label     = `200 OK — ${anomaly}`;
+            errorType = 'anomaly';
+          }
+        } catch {}
+      }
+
+      const status = { statusCode: res.status, responseTime, isOnline, label, errorType, anomaly };
+      const entry  = { id: uid(), timestamp, ...status };
 
       setMonitoring((prev) => {
         const wasOnline = prev[config.id]?.wasOnline ?? true;
-        if (!res.ok && wasOnline)
-          sendTelegramAlert(
-            config,
-            `🚨 PingPulse Alert\n\n${config.name}\n${config.url}\nStatus: ${status.label}\nTime: ${timestamp}`,
-          );
+        if (!isOnline && wasOnline) {
+          sendTelegramAlert(config, `🚨 PingPulse Alert\n\n${config.name}\n${config.url}\nStatus: ${label}\nTime: ${timestamp}`);
+          sendDownNotification(config, label);
+        }
         return {
           ...prev,
           [config.id]: {
             ...prev[config.id],
             status,
-            wasOnline: res.ok,
-            lastPingTs: Date.now(),
-            latencyData: [
-              ...(prev[config.id]?.latencyData ?? []).slice(-19),
-              responseTime,
-            ],
-            history: [...(prev[config.id]?.history ?? []).slice(-99), entry],
+            wasOnline: isOnline,
+            lastPingTs:  Date.now(),
+            latencyData: [...(prev[config.id]?.latencyData ?? []).slice(-19), responseTime],
+            history:     [...(prev[config.id]?.history     ?? []).slice(-99), entry],
           },
         };
       });
-    } catch {
-      const entry = {
-        id: uid(),
-        timestamp,
-        statusCode: 0,
-        responseTime: null,
-        isOnline: false,
-        label: "Offline",
-      };
+
+    } catch (err) {
+      clearTimeout(timeoutHandle);
+      const { label, errorType } = classifyError(err);
+      const status = { statusCode: 0, responseTime: null, isOnline: false, label, errorType, anomaly: null };
+      const entry  = { id: uid(), timestamp, ...status };
 
       setMonitoring((prev) => {
         const wasOnline = prev[config.id]?.wasOnline ?? true;
-        if (wasOnline)
-          sendTelegramAlert(
-            config,
-            `🚨 PingPulse Alert\n\n${config.name}\n${config.url}\nStatus: Offline\nTime: ${timestamp}`,
-          );
+        if (wasOnline) {
+          sendTelegramAlert(config, `🚨 PingPulse Alert\n\n${config.name}\n${config.url}\nStatus: ${label}\nTime: ${timestamp}`);
+          sendDownNotification(config, label);
+        }
         return {
           ...prev,
           [config.id]: {
             ...prev[config.id],
-            status: {
-              statusCode: 0,
-              responseTime: null,
-              isOnline: false,
-              label: "Offline",
-            },
-            wasOnline: false,
-            lastPingTs: Date.now(),
-            latencyData: [
-              ...(prev[config.id]?.latencyData ?? []).slice(-19),
-              0,
-            ],
-            history: [...(prev[config.id]?.history ?? []).slice(-99), entry],
+            status,
+            wasOnline:   false,
+            lastPingTs:  Date.now(),
+            latencyData: [...(prev[config.id]?.latencyData ?? []).slice(-19), 0],
+            history:     [...(prev[config.id]?.history     ?? []).slice(-99), entry],
           },
         };
       });
