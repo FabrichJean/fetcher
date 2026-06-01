@@ -15,8 +15,10 @@ export function MonitoringProvider({ children }) {
   function closeForm()      { setShowForm(false); setEditingConfig(null); }
 
   function handleSave(config) {
+    const isNew = !configs.find(c => c.id === config.id);
     saveConfig(config);
     closeForm();
+    if (isNew) launch(config);
   }
 
   return (

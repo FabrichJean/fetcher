@@ -1,13 +1,15 @@
 import { useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useActionSheet } from '@expo/react-native-action-sheet';
 import LatencyChart from './LatencyChart';
-import { CARD, CYAN, GREEN, RED } from '../constants';
+import { CARD, GREEN, RED } from '../constants';
 import { freqLabel, relativeTime } from '../utils';
 
 export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit, onDelete, onViewDetail }) {
   const [expanded, setExpanded] = useState(false);
   const { width } = useWindowDimensions();
+  const { showActionSheetWithOptions } = useActionSheet();
   const chartWidth = width - 32 - 32 - 16;
 
   const isRunning  = monState?.isRunning ?? false;
@@ -16,11 +18,37 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
   const lastPingTs = monState?.lastPingTs;
   const dotColor   = !isRunning ? '#333' : status?.isOnline ? GREEN : RED;
 
+  function handleLongPress() {
+    const toggleLabel = isRunning ? 'Stop' : 'Launch';
+    const options     = ['View Details', 'Edit', toggleLabel, 'Delete', 'Cancel'];
+
+    showActionSheetWithOptions(
+      {
+        title: config.name,
+        options,
+        cancelButtonIndex:      4,
+        destructiveButtonIndex: 3,
+        userInterfaceStyle:     'dark',
+      },
+      index => {
+        if (index === 0) onViewDetail();
+        if (index === 1) onEdit();
+        if (index === 2) isRunning ? onStop() : onLaunch();
+        if (index === 3) onDelete();
+      },
+    );
+  }
+
   return (
     <View style={s.card}>
 
-      {/* Header row */}
-      <TouchableOpacity style={s.row} onPress={() => setExpanded(e => !e)} activeOpacity={0.7}>
+      <TouchableOpacity
+        style={s.row}
+        onPress={() => setExpanded(e => !e)}
+        onLongPress={handleLongPress}
+        delayLongPress={350}
+        activeOpacity={0.7}
+      >
         <View style={[s.dot, { backgroundColor: dotColor }]} />
         <View style={s.meta}>
           <Text style={s.name}>{config.name}</Text>
@@ -36,7 +64,6 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
         <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color="#444" style={{ marginLeft: 8 }} />
       </TouchableOpacity>
 
-      {/* Expanded body */}
       {expanded && (
         <View style={s.body}>
 
@@ -69,39 +96,11 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
 
           <View style={s.divider} />
 
-          <Text style={s.info}>Freq: <Text style={s.infoVal}>{freqLabel(config.frequency)}</Text></Text>
-
-          <View style={s.actions}>
-            <TouchableOpacity style={s.actionBtn} onPress={onViewDetail}>
-              <Ionicons name="bar-chart-outline" size={15} color={CYAN} />
-              <Text style={[s.actionLabel, { color: CYAN }]}>Details</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.actionBtn} onPress={onEdit}>
-              <Ionicons name="pencil-outline" size={15} color="#777" />
-              <Text style={s.actionLabel}>Edit</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.actionBtn} onPress={() =>
-              Alert.alert('Delete monitor', `Delete "${config.name}"?`, [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Delete', style: 'destructive', onPress: onDelete },
-              ])
-            }>
-              <Ionicons name="trash-outline" size={15} color={RED} />
-              <Text style={[s.actionLabel, { color: RED }]}>Delete</Text>
-            </TouchableOpacity>
-            <View style={{ flex: 1 }} />
-            {isRunning ? (
-              <TouchableOpacity style={s.stopBtn} onPress={onStop}>
-                <Ionicons name="stop-circle-outline" size={15} color="#000" style={{ marginRight: 5 }} />
-                <Text style={s.stopText}>Stop</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity style={s.launchBtn} onPress={onLaunch}>
-                <Ionicons name="play-circle-outline" size={15} color="#000" style={{ marginRight: 5 }} />
-                <Text style={s.launchText}>Launch</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+          <Text style={s.info}>
+            Freq: <Text style={s.infoVal}>{freqLabel(config.frequency)}</Text>
+            {'   '}
+            <Text style={s.hint}>Hold to see actions</Text>
+          </Text>
 
         </View>
       )}
@@ -123,8 +122,8 @@ const s = StyleSheet.create({
   badgeRed:   { backgroundColor: '#2a0808' },
   badgeText:  { fontSize: 10, fontWeight: '800' },
 
-  body:       { paddingHorizontal: 14, paddingBottom: 14 },
-  divider:    { height: 1, backgroundColor: '#1e1e1e', marginVertical: 12 },
+  body:    { paddingHorizontal: 14, paddingBottom: 14 },
+  divider: { height: 1, backgroundColor: '#1e1e1e', marginVertical: 12 },
 
   statusRow:   { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
   statusLeft:  { alignItems: 'center', width: 68, marginRight: 14 },
@@ -138,14 +137,7 @@ const s = StyleSheet.create({
   xAxis:        { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   axisLabel:    { fontSize: 10, color: '#333' },
 
-  info:    { fontSize: 12, color: '#444', marginBottom: 4 },
+  info:    { fontSize: 12, color: '#444' },
   infoVal: { color: '#777', fontWeight: '600' },
-
-  actions:     { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 8 },
-  actionBtn:   { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 10, backgroundColor: '#1c1c1c', borderRadius: 6 },
-  actionLabel: { fontSize: 12, color: '#777', fontWeight: '600' },
-  launchBtn:   { flexDirection: 'row', alignItems: 'center', backgroundColor: GREEN, borderRadius: 6, paddingVertical: 7, paddingHorizontal: 14 },
-  launchText:  { color: '#000', fontWeight: '800', fontSize: 12 },
-  stopBtn:     { flexDirection: 'row', alignItems: 'center', backgroundColor: RED, borderRadius: 6, paddingVertical: 7, paddingHorizontal: 14 },
-  stopText:    { color: '#000', fontWeight: '800', fontSize: 12 },
+  hint:    { color: '#2a2a2a', fontSize: 11, fontStyle: 'italic' },
 });
