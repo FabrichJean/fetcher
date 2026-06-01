@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useActionSheet } from '@expo/react-native-action-sheet';
@@ -10,7 +10,9 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
   const [expanded, setExpanded] = useState(false);
   const { width } = useWindowDimensions();
   const { showActionSheetWithOptions } = useActionSheet();
-  const chartWidth = width - 32 - 32 - 16;
+  const chartWidth   = width - 32 - 32 - 16;
+  const lastTapRef   = useRef(0);
+  const tapTimerRef  = useRef(null);
 
   const isRunning  = monState?.isRunning ?? false;
   const status     = monState?.status;
@@ -18,7 +20,7 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
   const lastPingTs = monState?.lastPingTs;
   const dotColor   = !isRunning ? '#333' : status?.isOnline ? GREEN : RED;
 
-  function handleLongPress() {
+  function showMenu() {
     const toggleLabel = isRunning ? 'Stop' : 'Launch';
     const options     = ['View Details', 'Edit', toggleLabel, 'Delete', 'Cancel'];
 
@@ -44,8 +46,18 @@ export default function ConfigCard({ config, monState, onLaunch, onStop, onEdit,
 
       <TouchableOpacity
         style={s.row}
-        onPress={() => setExpanded(e => !e)}
-        onLongPress={handleLongPress}
+        onPress={() => {
+          const now = Date.now();
+          if (now - lastTapRef.current < 300) {
+            lastTapRef.current = 0;
+            clearTimeout(tapTimerRef.current);
+            showMenu();
+          } else {
+            lastTapRef.current = now;
+            tapTimerRef.current = setTimeout(() => setExpanded(e => !e), 280);
+          }
+        }}
+        onLongPress={showMenu}
         delayLongPress={350}
         activeOpacity={0.7}
       >
